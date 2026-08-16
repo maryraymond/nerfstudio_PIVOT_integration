@@ -107,6 +107,7 @@ class Nerfstudio(DataParser):
         cy_fixed = "cy" in meta
         height_fixed = "h" in meta
         width_fixed = "w" in meta
+        fixed_camera_type = "camera_model" in meta
         distort_fixed = False
         for distort_key in ["k1", "k2", "k3", "p1", "p2", "distortion_params"]:
             if distort_key in meta:
@@ -120,6 +121,7 @@ class Nerfstudio(DataParser):
         height = []
         width = []
         distort = []
+        per_frame_camera_type = []
 
         # sort the frames by fname
         fnames = []
@@ -134,6 +136,9 @@ class Nerfstudio(DataParser):
             filepath = Path(frame["file_path"])
             fname = self._get_fname(filepath, data_dir)
 
+            if not fixed_camera_type:
+                if "camera_model" in frame:
+                    per_frame_camera_type.append(CAMERA_MODEL_TO_TYPE[frame["camera_model"]])
             if not fx_fixed:
                 assert "fl_x" in frame, "fx not specified in frame"
                 fx.append(float(frame["fl_x"]))
@@ -267,6 +272,14 @@ class Nerfstudio(DataParser):
 
         if "camera_model" in meta:
             camera_type = CAMERA_MODEL_TO_TYPE[meta["camera_model"]]
+        elif len(per_frame_camera_type) > 0:
+            if len(per_frame_camera_type) < len(frames):
+                raise ValueError(
+                    f"No global camera type used and the number of per-frame camera types provided "
+                    f"({len(per_frame_camera_type)}) does not match the number of frames ({len(frames)})"
+                )
+            else:
+                camera_type = [per_frame_camera_type[i]  for i in indices]
         else:
             camera_type = CameraType.PERSPECTIVE
 
@@ -295,8 +308,11 @@ class Nerfstudio(DataParser):
         # Only add fisheye crop radius parameter if the images are actually fisheye, to allow the same config to be used
         # for both fisheye and non-fisheye datasets.
         metadata = {}
-        if (camera_type in [CameraType.FISHEYE, CameraType.FISHEYE624]) and (fisheye_crop_radius is not None):
+        if (fisheye_crop_radius is not None) and \
+           ((isinstance(camera_type, list) and ((CameraType.FISHEYE in camera_type) or (CameraType.FISHEYE624 in camera_type))) or \
+            (camera_type in [CameraType.FISHEYE, CameraType.FISHEYE624])):
             metadata["fisheye_crop_radius"] = fisheye_crop_radius
+            
 
         cameras = Cameras(
             fx=fx,
