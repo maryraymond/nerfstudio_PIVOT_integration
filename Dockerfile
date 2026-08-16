@@ -25,6 +25,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends --no-install-suggests \
         git \
         wget \
+        curl \
         ninja-build \
         build-essential \
         libboost-program-options-dev \
@@ -85,7 +86,7 @@ RUN pip install --no-cache-dir --upgrade pip 'setuptools<70.0.0' && \
     pip install --no-cache-dir torch==2.1.2+cu118 torchvision==0.16.2+cu118 'numpy<2.0.0' --extra-index-url https://download.pytorch.org/whl/cu118 && \
     git clone --branch master --recursive https://github.com/cvg/Hierarchical-Localization.git /opt/hloc && \
     cd /opt/hloc && git checkout v1.4 && python3.10 -m pip install --no-cache-dir . && cd ~ && \
-    TCNN_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" pip install --no-cache-dir "git+https://github.com/NVlabs/tiny-cuda-nn.git@b3473c81396fe927293bdfd5a6be32df8769927c#subdirectory=bindings/torch" && \
+    TCNN_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" pip install --no-cache-dir --no-build-isolation "git+https://github.com/NVlabs/tiny-cuda-nn.git@b3473c81396fe927293bdfd5a6be32df8769927c#subdirectory=bindings/torch" && \
     pip install --no-cache-dir pycolmap==0.6.1 pyceres==2.1 omegaconf==2.3.0
 
 # Install gsplat and nerfstudio.
@@ -98,9 +99,18 @@ COPY --from=source /tmp/nerfstudio/ /tmp/nerfstudio
 RUN export TORCH_CUDA_ARCH_LIST="$(echo "$CUDA_ARCHITECTURES" | tr ';' '\n' | awk '$0 > 70 {print substr($0,1,1)"."substr($0,2)}' | tr '\n' ' ' | sed 's/ $//')" && \
     export MAX_JOBS=4 && \
     GSPLAT_VERSION="$(sed -n 's/.*gsplat==\s*\([^," '"'"']*\).*/\1/p' /tmp/nerfstudio/pyproject.toml)" && \
-    pip install --no-cache-dir git+https://github.com/nerfstudio-project/gsplat.git@v${GSPLAT_VERSION} && \
+    pip install --no-cache-dir --no-build-isolation git+https://github.com/nerfstudio-project/gsplat.git@v${GSPLAT_VERSION} && \
     pip install --no-cache-dir /tmp/nerfstudio 'numpy<2.0.0' && \
     rm -rf /tmp/nerfstudio
+
+    # Now PIVOT dataset specific instalation
+ARG GITHUB_TOKEN
+ARG PIVOT_CACHE_BUST=1
+RUN python3.10 -m pip install "git+https://${GITHUB_TOKEN}@github.com/maryraymond/drone_3d_dataset.git@main#subdirectory=scripts/benchmarks"
+RUN python3.10 -m pip install "git+https://${GITHUB_TOKEN}@github.com/maryraymond/drone_3d_dataset.git@main#subdirectory=src/utils"
+RUN python3.10 -m pip install "git+https://${GITHUB_TOKEN}@github.com/maryraymond/drone_3d_dataset.git@main#subdirectory=src/reconstruction_eval"
+RUN pip install "git+https://${GITHUB_TOKEN}@github.com/maryraymond/drone_3d_dataset.git@main#subdirectory=src/dataset_export"
+
 
 # Fix permissions
 RUN chmod -R go=u /usr/local/lib/python3.10 && \
@@ -140,6 +150,7 @@ RUN apt-get update && \
         python3.10-dev \
         build-essential \
         python-is-python3 \
+        curl \
         ffmpeg
 
 # Copy packages from builder stage.
@@ -147,9 +158,27 @@ COPY --from=builder /build/colmap/ /usr/local/
 COPY --from=builder /build/glomap/ /usr/local/
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/ /usr/local/lib/python3.10/dist-packages/
 COPY --from=builder /usr/local/bin/ns* /usr/local/bin/
+# COPY --from=builder /usr/local/bin/pip* /usr/local/bin/
+
+# Download benchmark scripts from private repo
+ARG GITHUB_TOKEN
+RUN curl -fsSL "https://${GITHUB_TOKEN}@raw.githubusercontent.com/maryraymond/drone_3d_dataset/main/scripts/benchmarks/run_benchmarks.sh" \
+    -o /usr/local/bin/run_benchmarks && chmod +x /usr/local/bin/run_benchmarks
+RUN curl -fsSL "https://${GITHUB_TOKEN}@raw.githubusercontent.com/maryraymond/drone_3d_dataset/main/scripts/benchmarks/run_bm_nv_trace.sh" \
+    -o /usr/local/bin/run_bm_nv_trace && chmod +x /usr/local/bin/run_bm_nv_trace
+RUN curl -fsSL "https://${GITHUB_TOKEN}@raw.githubusercontent.com/maryraymond/drone_3d_dataset/main/scripts/benchmarks/run_bm_cam_calibr_trace.sh" \
+    -o /usr/local/bin/run_bm_cam_calibr_trace && chmod +x /usr/local/bin/run_bm_cam_calibr_trace
+RUN curl -fsSL "https://${GITHUB_TOKEN}@raw.githubusercontent.com/maryraymond/drone_3d_dataset/main/scripts/benchmarks/run_bm_poses_trace.sh" \
+    -o /usr/local/bin/run_bm_poses_trace && chmod +x /usr/local/bin/run_bm_poses_trace
+
+# Download the Nerfstudio dataset export script from private repo
+RUN curl -fsSL "https://${GITHUB_TOKEN}@raw.githubusercontent.com/maryraymond/drone_3d_dataset/main/scripts/export_dataset.py" \
+    -o /usr/local/bin/export_dataset.py && chmod +x /usr/local/bin/export_dataset.py
 
 # Install nerfstudio cli auto completion
 RUN /bin/bash -c 'ns-install-cli --mode install'
+
+
 
 # Bash as default entrypoint.
 CMD /bin/bash -l

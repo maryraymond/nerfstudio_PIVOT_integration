@@ -29,6 +29,11 @@ import tyro
 from nerfstudio.utils.eval_utils import eval_setup
 from nerfstudio.utils.rich_utils import CONSOLE
 
+from nerfstudio.scripts.datasets.ns_models_trajectory_eval import NsModel
+
+from reconstruction_eval.model_trajectory_eval import calculate_drone_ds_metrcis
+
+
 
 @dataclass
 class ComputePSNR:
@@ -40,25 +45,40 @@ class ComputePSNR:
     output_path: Path = Path("output.json")
     # Optional path to save rendered outputs to.
     render_output_path: Optional[Path] = None
+    # temp solution for running drone ds eval
+    run_drone_ds_eval:bool = False
+    # if the evaluation datset if different from the one used for training
+    # The root path to the evaluation dataset should be defined here
+    eval_dataset: Optional[str] = None
 
     def main(self) -> None:
         """Main function."""
-        config, pipeline, checkpoint_path, _ = eval_setup(self.load_config)
-        assert self.output_path.suffix == ".json"
-        if self.render_output_path is not None:
-            self.render_output_path.mkdir(parents=True, exist_ok=True)
-        metrics_dict = pipeline.get_average_eval_image_metrics(output_path=self.render_output_path, get_std=True)
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        # Get the output and define the names to save to
-        benchmark_info = {
-            "experiment_name": config.experiment_name,
-            "method_name": config.method_name,
-            "checkpoint": str(checkpoint_path),
-            "results": metrics_dict,
-        }
-        # Save output to output file
-        self.output_path.write_text(json.dumps(benchmark_info, indent=2), "utf8")
-        CONSOLE.print(f"Saved results to: {self.output_path}")
+        if self.run_drone_ds_eval:
+            model = NsModel(self.load_config, 
+                            compose_background=False)
+            
+            calculate_drone_ds_metrcis(model=model, 
+                                       out_dir=self.output_path, 
+                                       eval_dataset=self.eval_dataset,
+                                       debug=False, 
+                                       normalization_scale="scene_diameter")
+        else:
+            config, pipeline, checkpoint_path, _ = eval_setup(self.load_config)
+            assert self.output_path.suffix == ".json"
+            if self.render_output_path is not None:
+                self.render_output_path.mkdir(parents=True, exist_ok=True)
+            metrics_dict = pipeline.get_average_eval_image_metrics(output_path=self.render_output_path, get_std=True)
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            # Get the output and define the names to save to
+            benchmark_info = {
+                "experiment_name": config.experiment_name,
+                "method_name": config.method_name,
+                "checkpoint": str(checkpoint_path),
+                "results": metrics_dict,
+            }
+            # Save output to output file
+            self.output_path.write_text(json.dumps(benchmark_info, indent=2), "utf8")
+            CONSOLE.print(f"Saved results to: {self.output_path}")
 
 
 def entrypoint():
